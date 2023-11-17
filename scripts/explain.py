@@ -4,6 +4,7 @@ pd.options.mode.chained_assignment = None
 
 import numpy as np
 import argparse
+import copy
 
 from hriri.decision_maker import DecisionMaker,ACTION_NAMES
 from body_hri_explainer.CounterfactualExplanation import Counterfactual,CounterfactualExplainer,Observation,Outcome
@@ -33,14 +34,40 @@ class HRIBodyObservation(Observation):
         "D":[0.1,0.5,1,1.5,2,2.5,3,4,5,6,7,8,9],
     }
 
-    def __init__(self,body_df,waiting):
+    def __init__(self,body_df,waiting,bodies):
         self.body_df = body_df
-        self.bodies = list(body_df["Body"].unique())
+        self.bodies = bodies
+        self.detected_bodies = [x for x in list(body_df["Body"].unique()) if x!="ROBOT"]
         self.waiting = waiting
+        self.state = self.get_state()
 
     def print(self):
         print(self.body_df)
         print("WAITING: {}".format(self.waiting))
+
+    def get_influences(self):
+        influences = list(self.general_influences.keys())
+        for body in self.detected_bodies:
+            # Ignore undetected bodies
+            new_infs = ["{}_{}".format(body,x) for x in self.body_influences.keys()]
+            influences += new_infs
+        influences += ["ROBOT_{}".format(x) for x in self.robot_influences.keys()]
+        return influences
+    
+    def get_state(self):
+        state = {"Waiting":self.waiting}
+        for body in self.detected_bodies:
+            state[body] = {}
+            body_row_dict = self.body_df.loc[self.body_df["Body"]==body].reset_index().to_dict()
+            for var in self.body_influences:
+                state[body][var] = body_row_dict[var][0]
+        state["ROBOT"] = {}
+        robot_row_dict = self.body_df.loc[self.body_df["Body"]=="ROBOT"].reset_index().to_dict()
+        for var in self.robot_influences:
+            state["ROBOT"][var] = robot_row_dict[var][0]
+        return state
+
+        
         
 
 class HRIBodyCounterfactual(Counterfactual):
@@ -64,6 +91,20 @@ class HRIBodyCounterfactual(Counterfactual):
         '''
         self.decision_maker = decision_maker
         self.changes = changes
+
+    def copy(self):
+        return HRIBodyCounterfactual(self.decision_maker,changes=copy.deepcopy(self.changes))
+    
+    def full_state(self,observation):
+        state = copy.deepcopy(observation.state)
+        for change in self.changes:
+            if change == "Waiting":
+                state["Waiting"] = self.changes[change]
+            else:
+                for var in self.changes[change]:
+                    state[change][var] = self.changes[change][var]
+        return state
+
 
     def outcome(self,observation):
         counterfactual_df = observation.body_df.copy()
@@ -94,12 +135,12 @@ class HRIBodyExplainer:
 
     def explain(self,row_index,why_not=None,display=True):
         row = self.data.iloc[row_index,:]
-        body_df = self.row_to_body_df(row)
+        body_df,bodies = self.row_to_body_df(row)
         true_decision = row["Decision"]
         true_target = row["Target"]
         waiting = row["Waiting"]
 
-        true_observation = HRIBodyObservation(body_df,waiting)
+        true_observation = HRIBodyObservation(self.prune_body_df(body_df),waiting,bodies)
         true_outcome = HRIBodyOutcome(true_target,true_decision)
 
         self.display = display
@@ -110,7 +151,7 @@ class HRIBodyExplainer:
         if trivial:
             print("Explanation: {}".format(text_explanation))
         else:
-            cfx = CounterfactualExplainer(true_observation,true_outcome,HRIBodyCounterfactual)
+            cfx = CounterfactualExplainer(true_observation,true_outcome,HRIBodyCounterfactual,self.decision_maker)
             cfx.explain()
 
     '''
@@ -120,7 +161,7 @@ class HRIBodyExplainer:
     '''
 
     def handle_trivial_cases(self,observation,true_outcome,why_not):
-        self.body_indices = self.get_body_indices(self.prune_body_df(observation.body_df),observation.bodies)
+        self.body_indices = self.get_body_indices(observation.body_df,observation.bodies)
         text_explanation = None
         
         if why_not is not None and why_not != [None,None]:
@@ -213,7 +254,7 @@ class HRIBodyExplainer:
                     True,
                 ])
         body_df = pd.DataFrame(bdf_list,columns=headers)
-        return body_df
+        return body_df,bodies
 
 
     def get_bodies(self,row):
