@@ -14,6 +14,25 @@ class HRIBodyOutcome(Outcome):
         self.target = target
         self.decision = decision
 
+    def valid_outcome(self,outcome,why_not):
+        target = outcome[1]
+        decision = outcome[2]
+
+        if why_not is None or why_not == [None,None]:
+            # Valid if different from the true outcome
+            return target!=self.target or decision!=self.decision
+        else:
+            if why_not[0] is None:
+                # We care about the decision, not the target
+                return decision==why_not[1]
+            elif why_not[1] is None:
+                # We care about the target, not the decision
+                return target==why_not[0]
+            else:
+                # We care about both
+                return decision==why_not[1] and target==why_not[0]
+
+
 class HRIBodyObservation(Observation):
     general_influences = {
         "Waiting":[False,True]
@@ -34,12 +53,38 @@ class HRIBodyObservation(Observation):
         "D":[0.1,0.5,1,1.5,2,2.5,3,4,5,6,7,8,9],
     }
 
+    general_influence_types = {
+        "Waiting":"Categorical"
+    }
+
+    robot_influence_types = {
+        "G":"Categorical",
+        "GC":"Continuous"
+    }
+
+    body_influence_types = {
+        "G":"Categorical",
+        "GC":"Continuous",
+        "A":"Categorical",
+        "AC":"Continuous",
+        "EL":"Categorical",
+        "ELC":"Continuous",
+        "GWR":"Categorical",
+        "MG":"Continuous",
+        "D":"Continuous",
+    }
+
+
     def __init__(self,body_df,waiting,bodies):
         self.body_df = body_df
         self.bodies = bodies
         self.detected_bodies = [x for x in list(body_df["Body"].unique()) if x!="ROBOT"]
         self.waiting = waiting
+        self.body_state = self.get_body_state()
+        self.influences  = self.get_influences()
+        self.influence_types = self.get_influence_types()
         self.state = self.get_state()
+        self.cards = self.get_cards()
 
     def print(self):
         print(self.body_df)
@@ -54,7 +99,35 @@ class HRIBodyObservation(Observation):
         influences += ["ROBOT_{}".format(x) for x in self.robot_influences.keys()]
         return influences
     
-    def get_state(self):
+    def get_influence_types(self):
+        influence_types = {}
+        for influence in self.influences:
+            if influence in self.general_influences:
+                influence_types[influence] = self.general_influence_types[influence]
+            else:
+                inf_list = influence.split("_")
+                if inf_list[0] == "ROBOT":
+                    influence_types[influence] = self.robot_influence_types[inf_list[1]]
+                else:
+                    influence_types[influence] = self.body_influence_types[inf_list[1]]
+        return influence_types
+    
+    def get_cards(self):
+        cards = {}
+        for influence in self.influences:
+            if influence in self.general_influences:
+                cards[influence] = self.general_influences[influence]
+            else:
+                inf_list = influence.split("_")
+                if inf_list[0] == "ROBOT":
+                    cards[influence] = self.robot_influences[inf_list[1]]
+                else:
+                    cards[influence] = self.body_influences[inf_list[1]]
+        return cards
+
+
+    
+    def get_body_state(self):
         state = {"Waiting":self.waiting}
         for body in self.detected_bodies:
             state[body] = {}
@@ -66,16 +139,70 @@ class HRIBodyObservation(Observation):
         for var in self.robot_influences:
             state["ROBOT"][var] = robot_row_dict[var][0]
         return state
+    
+    def get_state(self):
+        influence_state = {}
+        for var in self.influences:
+            if var in self.general_influences:
+                influence_state[var] = self.body_state[var]
+            else:
+                var_list = var.split("_")
+                influence_state[var] = self.body_state[var_list[0]][var_list[1]]
+        return influence_state
+    
+    def get_state_from_assignment(self,assignment):
+        state = {}
+        for var,ass_val in zip(self.influences,assignment):
+            if var in self.general_influences:
+                state[var] = ass_val
+            else:
+                var_list = var.split("_")
+                if var_list[0] not in state:
+                    state[var_list[0]] = {}
+                state[var_list[0]][var_list[1]] = ass_val
+        return state
+
+    def critical_cards(self,var):
+        # Same as observation except for var, which is everything other than observation
+        
+        card_ranges = []
+        for ivar in self.influences:
+            if ivar == var:
+                clist = self.cards[ivar]
+                clist.remove(self.state[ivar])
+                card_ranges.append(clist)
+            else:
+                card_ranges.append([self.state[ivar]])
+        return card_ranges
+    
+    def critical_interventions(self,interventions,var):
+        intervention_list = []
+        clist = self.cards[var].copy()
+        clist.remove(self.state[var])
+        for changed_val in clist:
+            new_intervention = interventions.copy()
+            if var in self.general_influences:
+                new_intervention[var] = changed_val
+            else:
+                var_list = var.split("_")
+                if var_list[0] not in new_intervention:
+                    new_intervention[var_list[0]] = {}
+                new_intervention[var_list[0]][var_list[1]] = changed_val
+            intervention_list.append(new_intervention)
+        return intervention_list
+
 
         
         
 
 class HRIBodyCounterfactual(Counterfactual):
-    def __init__(self,decision_maker,changes={}):
+    def __init__(self,decision_maker,intervention_order=[],interventions={},changes={}):
         '''
-        Changes:
+        intervention_order = ["waiting","aaaaa_G",etc.]
+
+        interventions:
             {
-            "waiting":...,
+            "Waiting":...,
             "aaaaa":{
                 "G":...,
                 "GC"...,
@@ -90,13 +217,15 @@ class HRIBodyCounterfactual(Counterfactual):
             }
         '''
         self.decision_maker = decision_maker
+        self.intervention_order = intervention_order
+        self.interventions = interventions
         self.changes = changes
 
     def copy(self):
-        return HRIBodyCounterfactual(self.decision_maker,changes=copy.deepcopy(self.changes))
+        return HRIBodyCounterfactual(self.decision_maker,intervention_order=self.intervention_order,interventions=copy.deepcopy(self.interventions),changes=copy.deepcopy(self.changes))
     
     def full_state(self,observation):
-        state = copy.deepcopy(observation.state)
+        state = copy.deepcopy(observation.body_state)
         for change in self.changes:
             if change == "Waiting":
                 state["Waiting"] = self.changes[change]
@@ -104,26 +233,49 @@ class HRIBodyCounterfactual(Counterfactual):
                 for var in self.changes[change]:
                     state[change][var] = self.changes[change][var]
         return state
-
-
-    def outcome(self,observation):
+    
+    def outcome(self,observation,intervention_order=None,interventions=None):
         counterfactual_df = observation.body_df.copy()
         counterfactual_waiting = observation.waiting
 
-        for change in self.changes:
+        if intervention_order is None:
+            intervention_order = self.intervention_order
+        if interventions is None:
+            interventions = self.interventions
+
+        changes = self.apply_interventions(observation,intervention_order,interventions)
+        for change in changes:
             if change == "Waiting":
-                counterfactual_waiting = self.changes[change]
+                counterfactual_waiting = changes[change]
             else:
-                idx_list = np.flatnonzero(counterfactual_df['Body'] == change)
+                idx_list = counterfactual_df.index[counterfactual_df['Body']==change]
                 if idx_list.size == 0:
                     # Body not in body df
                     continue
                 else:
                     body_idx = idx_list[0]
-                    for body_var in self.changes[change]:
-                        counterfactual_df.at[body_idx,body_var] = self.changes[change][body_var]
-        
+                    for body_var in changes[change]:
+                        counterfactual_df.at[body_idx,body_var] = changes[change][body_var]
+
         return self.decision_maker.decide(counterfactual_df,counterfactual_waiting)
+    
+    def apply_interventions(self,observation,intervention_order,interventions,causal=False):
+        changes = {}
+        if causal:
+            # TODO: Add causal reasoning here
+            pass
+        else:
+            for intrv in intervention_order:
+                if intrv in observation.general_influences:
+                    changes[intrv] = interventions[intrv]
+                else:
+                    intrv_list = intrv.split("_")
+                    if intrv_list[0] not in changes:
+                        changes[intrv_list[0]] = {}
+                    changes[intrv_list[0]][intrv_list[1]] = interventions[intrv_list[0]][intrv_list[1]]
+        return changes
+
+
 
 
 class HRIBodyExplainer:
@@ -152,7 +304,7 @@ class HRIBodyExplainer:
             print("Explanation: {}".format(text_explanation))
         else:
             cfx = CounterfactualExplainer(true_observation,true_outcome,HRIBodyCounterfactual,self.decision_maker)
-            cfx.explain()
+            cfx.explain(why_not)
 
     '''
     
@@ -274,6 +426,16 @@ class HRIBodyExplainer:
                 body_indices[body] = idx_list[0]
 
         return body_indices
+    
+    def get_decision_indices(self,exclude=[]):
+        indices = []
+        for i in range(len(ACTION_NAMES)):
+            if i in exclude:
+                indices.append(None)
+            else:
+                indices.append(self.data.index[self.data['Decision']==i].tolist())
+        return indices
+
 
 if __name__ == "__main__":
 
@@ -286,6 +448,10 @@ if __name__ == "__main__":
     dm = DecisionMaker()
     exp = HRIBodyExplainer(filename,dm)
 
+    print(exp.get_decision_indices(exclude=[1]))
+
     
 
     exp.explain(args["row"],why_not=[None,None])
+    exp.explain(args["row"],why_not=[None,5])
+    exp.explain(args["row"],why_not=["vxmre",None])
