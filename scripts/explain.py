@@ -5,6 +5,7 @@ pd.options.mode.chained_assignment = None
 import numpy as np
 import argparse
 import copy
+import itertools
 
 from hriri.decision_maker import DecisionMaker,ACTION_NAMES
 from body_hri_explainer.CounterfactualExplanation import Counterfactual,CounterfactualExplainer,Observation,Outcome
@@ -190,6 +191,31 @@ class HRIBodyObservation(Observation):
                 new_intervention[var_list[0]][var_list[1]] = changed_val
             intervention_list.append(new_intervention)
         return intervention_list
+    
+    def potential_interventions(self,interventions,var):
+        pass
+
+    def critical_interventions_multi(self,interventions,vars):
+        intervention_list = []
+        clists = []
+        for var in vars:
+            clists.append(self.cards[var].copy())
+            clists[-1].remove(self.state[var])
+        asses = list(itertools.product(*clists))
+        
+        for ass in asses:
+            new_intervention = interventions.copy()
+            for var,var_val in zip(vars,ass):
+                if var in self.general_influences:
+                    new_intervention[var] = var_val
+                else:
+                    var_list = var.split("_")
+                    if var_list[0] not in new_intervention:
+                        new_intervention[var_list[0]] = {}
+                    new_intervention[var_list[0]][var_list[1]] = var_val
+            intervention_list.append(new_intervention)
+        return intervention_list
+            
 
 
         
@@ -274,6 +300,16 @@ class HRIBodyCounterfactual(Counterfactual):
                         changes[intrv_list[0]] = {}
                     changes[intrv_list[0]][intrv_list[1]] = interventions[intrv_list[0]][intrv_list[1]]
         return changes
+    
+    def in_interventions(self,influence_var):
+        if influence_var in self.interventions:
+            return True
+        
+        vlist = influence_var.split("_")
+        if len(vlist)==2 and vlist[0] in self.interventions and vlist[1] in self.interventions[vlist[0]]:
+            return True
+        
+        return False
 
 
 

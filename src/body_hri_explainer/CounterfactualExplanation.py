@@ -42,6 +42,11 @@ class CounterfactualExplainer:
         if counterfactual is None:
             counterfactual = self.CF(self.decision_maker)
         critical_influences,critical_thresholds = self.find_critical_influences(influences,why_not,counterfactual)
+
+        if len(critical_influences)==0:
+            # Need to find a partial explanation
+            potential_influences = self.find_potential_influences(influences,why_not,counterfactual,critical_influences)
+
         print(critical_influences,critical_thresholds)
 
         return None,None
@@ -93,6 +98,33 @@ class CounterfactualExplainer:
                         thresholds.append((cia,cib))
 
         return critical_influences,thresholds
+    
+    '''
+    
+    POTENTIAL INFLUENCES
+    
+    '''
+
+    def find_potential_influences(self,influences,why_not,counterfactual,critical_influences):
+        for var in influences:
+            if var in critical_influences or counterfactual.in_interventions(var):
+                continue
+
+
+            # TESTING
+            man_var = "sluyo_D"
+            vars = [man_var,var]
+            if var != man_var:
+                critical_interventions = self.true_observation.critical_interventions_multi(counterfactual.interventions,vars)
+                for ci in critical_interventions:
+                    outcome = counterfactual.outcome(self.true_observation,counterfactual.intervention_order+vars,ci)
+                    valid_outcome = self.true_outcome.valid_outcome(outcome,why_not)
+                    if valid_outcome:
+                        print(ci)
+            
+
+            
+            
     
     '''
     
