@@ -45,7 +45,8 @@ class CounterfactualExplainer:
 
         if len(critical_influences)==0:
             # Need to find a partial explanation
-            potential_influences = self.find_potential_influences(influences,why_not,counterfactual,critical_influences)
+            # TODO: proper loop here, maybe rename as not really potential, get the function to return something useful
+            potential_influences = self.find_potential_influences(influences,why_not,counterfactual,depth=2)
 
         print(critical_influences,critical_thresholds)
 
@@ -95,7 +96,8 @@ class CounterfactualExplainer:
                     # TODO: Consider the real value of the variable, how does this affect things?
                     if cia is not None:
                         critical_influences.append(var)
-                        thresholds.append((cia,cib))
+                        #thresholds.append((cia,cib))
+                        thresholds.append(outcomes)
 
         return critical_influences,thresholds
     
@@ -105,22 +107,17 @@ class CounterfactualExplainer:
     
     '''
 
-    def find_potential_influences(self,influences,why_not,counterfactual,critical_influences):
-        for var in influences:
-            if var in critical_influences or counterfactual.in_interventions(var):
-                continue
-
-
-            # TESTING
-            man_var = "sluyo_D"
-            vars = [man_var,var]
-            if var != man_var:
-                critical_interventions = self.true_observation.critical_interventions_multi(counterfactual.interventions,vars)
-                for ci in critical_interventions:
-                    outcome = counterfactual.outcome(self.true_observation,counterfactual.intervention_order+vars,ci)
-                    valid_outcome = self.true_outcome.valid_outcome(outcome,why_not)
-                    if valid_outcome:
-                        print(ci)
+    def find_potential_influences(self,influences,why_not,counterfactual,depth):
+        combos = itertools.combinations(influences, depth)
+        for combo in combos:
+            critical_interventions = self.true_observation.critical_interventions_multi(counterfactual.interventions,combo)
+            outcomes = []
+            for ci in critical_interventions:
+                outcome = counterfactual.outcome(self.true_observation,counterfactual.intervention_order+list(combo),ci)
+                valid_outcome = self.true_outcome.valid_outcome(outcome,why_not)
+                outcomes.append(valid_outcome)
+                if valid_outcome:
+                    print(ci)
             
 
             

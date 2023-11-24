@@ -6,8 +6,10 @@ import numpy as np
 import argparse
 import copy
 import itertools
+import networkx as nx
 
 from hriri.decision_maker import DecisionMaker,ACTION_NAMES
+from hriri.msg import EngagementLevel
 from body_hri_explainer.CounterfactualExplanation import Counterfactual,CounterfactualExplainer,Observation,Outcome
 
 class HRIBodyOutcome(Outcome):
@@ -51,6 +53,7 @@ class HRIBodyObservation(Observation):
         "ELC":[0,1,2,3],
         "GWR":[False,True],
         "MG":[0,1,2,3],
+        "EV":[0,1,2,3],
         "D":[0.1,0.5,1,1.5,2,2.5,3,4,5,6,7,8,9],
     }
 
@@ -72,6 +75,7 @@ class HRIBodyObservation(Observation):
         "ELC":"Continuous",
         "GWR":"Categorical",
         "MG":"Continuous",
+        "EV":"Continuous",
         "D":"Continuous",
     }
 
@@ -86,6 +90,7 @@ class HRIBodyObservation(Observation):
         self.influence_types = self.get_influence_types()
         self.state = self.get_state()
         self.cards = self.get_cards()
+        self.causal_graph = self.get_causal_graph()
 
     def print(self):
         print(self.body_df)
@@ -215,6 +220,54 @@ class HRIBodyObservation(Observation):
                     new_intervention[var_list[0]][var_list[1]] = var_val
             intervention_list.append(new_intervention)
         return intervention_list
+    
+    def get_causal_graph(self):
+        G = nx.DiGraph()
+        for body in self.bodies:
+            if body != "ROBOT":
+                edges = [
+                    ("{}_MG".format(body),"{}_EV".format(body)),
+                    ("{}_D".format(body),"{}_EV".format(body)),
+                    ("{}_EV".format(body),"{}_EL".format(body))
+                ]
+                G.add_edges_from(edges)
+        return G
+    
+    def get_causal_effect(self,u,v,changes,dm):
+        u_list = u.split("_")
+        v_list = v.split("_")
+        if u_list[0] in self.bodies and v_list[0] == u_list[0]:
+            vars = ["D","MG","EV","EL"]
+            #var_vals = {k:self.state[k] for k in ["{}_{}".format(u_list[0],v) for v in vars]}
+            var_vals = {k:self.state["{}_{}".format(u_list[0],k)] for k in vars}
+            
+            # Override with any changes
+            if u_list[0] in changes:
+                for var in vars:
+                    if var in changes[u_list[0]]:
+                        var_vals[var] = changes[u_list[0]][var]
+            
+            # Get causal effect
+            if u_list[1] in ["D","MG"] and v_list[1] == "EV":
+                new_ev = min(1,(var_vals["MG"]/max(self.body_influences["MG"]))/var_vals["D"] if var_vals["D"] != 0 else 0)
+                changes[u_list[0]]["EV"] = dm.float_bucket(new_ev)
+            elif u_list[1] == "EV" and v_list[1] == "EL":
+                # TODO: Implement something smarter here for estimating engagement level
+                ev = var_vals["EV"]
+                if ev > 0.75:
+                    el = EngagementLevel.ENGAGED
+                elif ev > 0.5:
+                    el = EngagementLevel.ENGAGING
+                elif ev > 0.25:
+                    el = EngagementLevel.DISENGAGING
+                else:
+                    el = EngagementLevel.DISENGAGED
+                changes[u_list[0]]["EL"] = el
+
+
+
+        return changes
+
             
 
 
@@ -285,20 +338,44 @@ class HRIBodyCounterfactual(Counterfactual):
 
         return self.decision_maker.decide(counterfactual_df,counterfactual_waiting)
     
-    def apply_interventions(self,observation,intervention_order,interventions,causal=False):
+    def apply_interventions(self,observation,intervention_order,interventions,causal=True):
         changes = {}
         if causal:
             # TODO: Add causal reasoning here
-            pass
+            causal_graph = observation.causal_graph.copy()
+            
+            for intrv in intervention_order:
+                if intrv in causal_graph.nodes:
+                    # In the order of interventions, remove the edges from parents of intervened node
+                    parents = list(causal_graph.predecessors(intrv))
+                    for par in parents:
+                        causal_graph.remove_edge(par,intrv)
+                    # Apply causal effects
+                    changes = self.apply_change(changes,interventions,observation,intrv)
+                    changes = self.apply_causal_effects(causal_graph,changes,observation,intrv)
         else:
             for intrv in intervention_order:
-                if intrv in observation.general_influences:
-                    changes[intrv] = interventions[intrv]
-                else:
-                    intrv_list = intrv.split("_")
-                    if intrv_list[0] not in changes:
-                        changes[intrv_list[0]] = {}
-                    changes[intrv_list[0]][intrv_list[1]] = interventions[intrv_list[0]][intrv_list[1]]
+                changes = self.apply_change(changes,interventions,observation,intrv)
+        return changes
+    
+    def apply_causal_effects(self,causal_graph,changes,observation,intrv):
+        children = causal_graph.successors(intrv)
+        for child in children:
+            changes = observation.get_causal_effect(intrv,child,changes,self.decision_maker)
+        # Recursively apply down the graph
+        for child in children:
+            changes = self.apply_causal_effects(causal_graph,changes,observation,child)
+
+        return changes
+
+    def apply_change(self,changes,interventions,observation,var):
+        if var in observation.general_influences:
+            changes[var] = interventions[var]
+        else:
+            intrv_list = var.split("_")
+            if intrv_list[0] not in changes:
+                changes[intrv_list[0]] = {}
+            changes[intrv_list[0]][intrv_list[1]] = interventions[intrv_list[0]][intrv_list[1]]
         return changes
     
     def in_interventions(self,influence_var):
