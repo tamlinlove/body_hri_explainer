@@ -553,11 +553,11 @@ class HRIBodyExplainer:
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("-f", "--file", nargs='?', const=1, type=str, default="decision_test.csv")
+    parser.add_argument("-f", "--file", nargs='?', const=1, type=str, default="UntitledExperiment")
     parser.add_argument("-r", "--row", nargs='?', const=1, type=int, default=0)
     args = vars(parser.parse_args())
 
-    filename = HRIBodyExplainer.csv_dir + args["file"]
+    filename = HRIBodyExplainer.csv_dir + args["file"] + ".csv"
     dm = DecisionMaker()
     exp = HRIBodyExplainer(filename,dm)
 
