@@ -15,6 +15,8 @@ from body_hri_explainer.CounterfactualExplanation import Counterfactual,Counterf
 class HRIBodyOutcome(Outcome):
     def __init__(self,target,decision):
         self.target = target
+        if isinstance(target,float) and np.isnan(target):
+            self.target = None
         self.decision = decision
 
     def valid_outcome(self,outcome,why_not):
@@ -253,7 +255,7 @@ class HRIBodyObservation(Observation):
                 changes[u_list[0]]["EV"] = dm.float_bucket(new_ev)
             elif u_list[1] == "EV" and v_list[1] == "EL":
                 # TODO: Implement something smarter here for estimating engagement level
-                ev = var_vals["EV"]
+                ev = var_vals["EV"]/max(self.body_influences["EV"])
                 if ev > 0.75:
                     el = EngagementLevel.ENGAGED
                 elif ev > 0.5:
@@ -402,7 +404,7 @@ class HRIBodyExplainer:
         self.data = pd.read_csv(csv_file)
         self.decision_maker = decision_maker
 
-    def explain(self,row_index,why_not=None,display=True):
+    def explain(self,row_index,why_not=None,display=True,max_depth=2):
         row = self.data.iloc[row_index,:]
         body_df,bodies = self.row_to_body_df(row)
         true_decision = row["Decision"]
@@ -421,7 +423,7 @@ class HRIBodyExplainer:
             print("Explanation: {}".format(text_explanation))
         else:
             cfx = CounterfactualExplainer(true_observation,true_outcome,HRIBodyCounterfactual,self.decision_maker)
-            cfx.explain(why_not)
+            cfx.explain(why_not,max_depth)
 
     '''
     
@@ -446,8 +448,11 @@ class HRIBodyExplainer:
                     text_explanation = "The robot did not select target {0} because {0} was not detected at the time".format(why_not[0])
                 elif why_not[0] == "ROBOT":
                     text_explanation = "The robot cannot target itself"
-            elif isinstance(true_outcome.target,float) and np.isnan(true_outcome.target):
+            elif isinstance(true_outcome.target,float) and np.isnan(true_outcome.target) and why_not[1] == true_outcome.decision:
                 text_explanation = "Your query is exactly the decision the robot made"
+            elif why_not[1] == true_outcome.decision:
+                text_explanation = "Your query is exactly the decision the robot made"
+            
 
         return text_explanation is not None,text_explanation
     
@@ -563,6 +568,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("-f", "--file", nargs='?', const=1, type=str, default="UntitledExperiment")
     parser.add_argument("-r", "--row", nargs='?', const=1, type=int, default=0)
+    parser.add_argument("-wt", "--why_not_target", nargs='?', const=1, type=str, default=None)
+    parser.add_argument("-wd", "--why_not_decision", nargs='?', const=1, type=int, default=None)
+    parser.add_argument("-d", "--depth", nargs='?', const=1, type=int, default=2)
     args = vars(parser.parse_args())
 
     filename = HRIBodyExplainer.csv_dir + args["file"] + ".csv"
@@ -570,10 +578,8 @@ if __name__ == "__main__":
     exp = HRIBodyExplainer(filename,dm)
 
     print(exp.get_decision_indices(exclude=[1]))
+    print(exp.data.shape[0])
 
     
 
-    exp.explain(args["row"],why_not=[None,None])
-    #exp.explain(args["row"],why_not=[None,5])
-    exp.explain(args["row"],why_not=[None,4])
-    exp.explain(args["row"],why_not=["vxmre",None])
+    exp.explain(args["row"],why_not=[args["why_not_target"],args["why_not_decision"]],max_depth=args["depth"])

@@ -33,12 +33,12 @@ class CounterfactualExplainer:
         self.CF = counterfactual
         self.decision_maker = decision_maker
 
-    def explain(self,why_not):
+    def explain(self,why_not,max_depth):
         influences = self.true_observation.get_influences()
 
-        complete_explanations,partial_explanations = self.explain_case(influences,why_not)
+        complete_explanations,partial_explanations = self.explain_case(influences,why_not,max_depth=max_depth)
 
-    def explain_case(self,influences,why_not,counterfactual=None):
+    def explain_case(self,influences,why_not,counterfactual=None,max_depth=2):
         if counterfactual is None:
             counterfactual = self.CF(self.decision_maker)
         critical_influences,critical_thresholds = self.find_critical_influences(influences,why_not,counterfactual)
@@ -47,8 +47,9 @@ class CounterfactualExplainer:
             # Need to find a partial explanation
             # TODO: proper loop here, maybe rename as not really potential, get the function to return something useful
             print("No critical influences found, will try deeper searches...")
-            potential_influences = self.find_potential_influences(influences,why_not,counterfactual,depth=2)
-            potential_influences = self.find_potential_influences(influences,why_not,counterfactual,depth=3)
+            for i in range(2,max_depth+1):
+                print("Explanations with {} variables".format(i))
+                potential_influences = self.find_potential_influences(influences,why_not,counterfactual,depth=i)
 
         print(critical_influences,critical_thresholds)
 
@@ -92,13 +93,14 @@ class CounterfactualExplainer:
                     for ci in critical_interventions:
                         outcome = counterfactual.outcome(self.true_observation,counterfactual.intervention_order+[var],ci)
                         valid_outcome = self.true_outcome.valid_outcome(outcome,why_not)
+
                         outcomes.append(valid_outcome)
                     cia,cib = self.calculate_threshold_index(outcomes)
                     # TODO: Consider the real value of the variable, how does this affect things?
                     if cia is not None:
                         critical_influences.append(var)
-                        #thresholds.append((cia,cib))
-                        thresholds.append(outcomes)
+                        thresholds.append((cia,cib))
+                        #thresholds.append(outcomes)
 
         return critical_influences,thresholds
     
