@@ -299,6 +299,7 @@ class HRIBodyCounterfactual(Counterfactual):
         self.intervention_order = intervention_order
         self.interventions = interventions
         self.changes = changes
+        self.action_names = ACTION_NAMES
 
     def copy(self):
         return HRIBodyCounterfactual(self.decision_maker,intervention_order=self.intervention_order,interventions=copy.deepcopy(self.interventions),changes=copy.deepcopy(self.changes))
@@ -353,6 +354,9 @@ class HRIBodyCounterfactual(Counterfactual):
                     # Apply causal effects
                     changes = self.apply_change(changes,interventions,observation,intrv)
                     changes = self.apply_causal_effects(causal_graph,changes,observation,intrv)
+                else:
+                    # Just apply regularly
+                    changes = self.apply_change(changes,interventions,observation,intrv)
         else:
             for intrv in intervention_order:
                 changes = self.apply_change(changes,interventions,observation,intrv)

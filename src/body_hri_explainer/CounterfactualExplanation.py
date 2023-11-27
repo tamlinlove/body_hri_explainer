@@ -46,7 +46,9 @@ class CounterfactualExplainer:
         if len(critical_influences)==0:
             # Need to find a partial explanation
             # TODO: proper loop here, maybe rename as not really potential, get the function to return something useful
+            print("No critical influences found, will try deeper searches...")
             potential_influences = self.find_potential_influences(influences,why_not,counterfactual,depth=2)
+            potential_influences = self.find_potential_influences(influences,why_not,counterfactual,depth=3)
 
         print(critical_influences,critical_thresholds)
 
@@ -64,7 +66,6 @@ class CounterfactualExplainer:
             if var in counterfactual.changes:
                 # Ignore variables we have already changed
                 continue
-
             
             critical_interventions = self.true_observation.critical_interventions(counterfactual.interventions,var)
 
@@ -109,15 +110,22 @@ class CounterfactualExplainer:
 
     def find_potential_influences(self,influences,why_not,counterfactual,depth):
         combos = itertools.combinations(influences, depth)
+        action_counts = {}
         for combo in combos:
             critical_interventions = self.true_observation.critical_interventions_multi(counterfactual.interventions,combo)
             outcomes = []
             for ci in critical_interventions:
                 outcome = counterfactual.outcome(self.true_observation,counterfactual.intervention_order+list(combo),ci)
+                action_name = counterfactual.action_names[outcome[2]]
+                if action_name not in action_counts:
+                    action_counts[action_name] = 1
+                else:
+                    action_counts[action_name] += 1
                 valid_outcome = self.true_outcome.valid_outcome(outcome,why_not)
                 outcomes.append(valid_outcome)
                 if valid_outcome:
                     print(ci)
+        print(action_counts)
             
 
             
