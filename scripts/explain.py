@@ -434,7 +434,7 @@ class HRIBodyExplainer:
         text_explanation = None
         
         if why_not is not None and why_not != [None,None]:
-            if why_not[0] == true_outcome.target and why_not[1] == true_outcome.decision:
+            if (why_not[0] == true_outcome.target or (why_not[0] is None and np.isnan(true_outcome.target))) and why_not[1] == true_outcome.decision:
                 text_explanation = "Your query is exactly the decision the robot made"
             
             if why_not[0] is not None:
@@ -570,5 +570,6 @@ if __name__ == "__main__":
     
 
     exp.explain(args["row"],why_not=[None,None])
-    exp.explain(args["row"],why_not=[None,5])
+    #exp.explain(args["row"],why_not=[None,5])
+    exp.explain(args["row"],why_not=[None,4])
     exp.explain(args["row"],why_not=["vxmre",None])
