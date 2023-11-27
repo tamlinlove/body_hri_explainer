@@ -432,9 +432,11 @@ class HRIBodyExplainer:
     def handle_trivial_cases(self,observation,true_outcome,why_not):
         self.body_indices = self.get_body_indices(observation.body_df,observation.bodies)
         text_explanation = None
+
+
         
         if why_not is not None and why_not != [None,None]:
-            if (why_not[0] == true_outcome.target or (why_not[0] is None and np.isnan(true_outcome.target))) and why_not[1] == true_outcome.decision:
+            if why_not[0] == true_outcome.target and why_not[1] == true_outcome.decision:
                 text_explanation = "Your query is exactly the decision the robot made"
             
             if why_not[0] is not None:
@@ -444,6 +446,8 @@ class HRIBodyExplainer:
                     text_explanation = "The robot did not select target {0} because {0} was not detected at the time".format(why_not[0])
                 elif why_not[0] == "ROBOT":
                     text_explanation = "The robot cannot target itself"
+            elif isinstance(true_outcome.target,float) and np.isnan(true_outcome.target):
+                text_explanation = "Your query is exactly the decision the robot made"
 
         return text_explanation is not None,text_explanation
     
